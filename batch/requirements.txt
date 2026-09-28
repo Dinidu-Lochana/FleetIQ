@@ -1,0 +1,5 @@
+# Installed inside the airflow image (see airflow/Dockerfile) since this
+# job is invoked by Airflow via `python batch_reconciliation.py`, not run
+# as its own container.
+pyspark==3.4.0
+psycopg2-binary==2.9.9
