@@ -1,0 +1,208 @@
+name: fleetiq
+
+x-app-env: &app-env
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: ${POSTGRES_USER:-fleetiq}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fleetiq}
+  POSTGRES_DB: ${POSTGRES_DB:-fleetiq}
+  SIM_DAY_SECONDS: ${SIM_DAY_SECONDS:-300}
+  KAFKA_BROKERS: kafka:9092
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fleetiq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fleetiq}
+      POSTGRES_DB: ${POSTGRES_DB:-fleetiq}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:3.7.0
+    environment:
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:--7VxvoFr2zbMB11QoJWcpg}
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  kafka-init:
+    image: apache/kafka:3.7.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists
+        --topic fleet.telemetry --partitions 3 --replication-factor 1
+    restart: "no"
+
+  telemetry-producer:
+    build:
+      context: .
+      dockerfile: simulators/Dockerfile
+    command: ["python", "/app/simulators/telemetry_producer.py"]
+    environment:
+      <<: *app-env
+      FLEET_SIZE: ${FLEET_SIZE:-24}
+      TICK_SECONDS: ${TICK_SECONDS:-3}
+      CHRONICALLY_IDLE_FRACTION: ${CHRONICALLY_IDLE_FRACTION:-0.15}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  batch-source:
+    build:
+      context: .
+      dockerfile: simulators/Dockerfile
+    command: ["python", "/app/simulators/batch_expense_source.py"]
+    environment:
+      <<: *app-env
+      FLEET_SIZE: ${FLEET_SIZE:-24}
+      LANDING_DIR: /app/data/landing
+    volumes:
+      - ./data/landing:/app/data/landing
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  stream-processor:
+    build:
+      context: .
+      dockerfile: streaming/Dockerfile
+    environment:
+      <<: *app-env
+      CHECKPOINT_ROOT: /app/checkpoints
+    volumes:
+      - checkpoints_data:/app/checkpoints
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  airflow-init:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create \
+          --username "${AIRFLOW_ADMIN_USER:-admin}" \
+          --password "${AIRFLOW_ADMIN_PASSWORD:-admin}" \
+          --firstname Fleet --lastname IQ --role Admin \
+          --email admin@example.com || true
+    environment: &airflow-env
+      <<: *app-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-fleetiq}:${POSTGRES_PASSWORD:-fleetiq}@postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+      LANDING_DIR: /opt/airflow/data/landing
+    volumes:
+      - airflow_logs:/opt/airflow/logs
+      - ./data:/opt/airflow/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    command: webserver
+    environment: *airflow-env
+    volumes:
+      - airflow_logs:/opt/airflow/logs
+      - ./data:/opt/airflow/data
+    ports:
+      - "8081:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    command: scheduler
+    environment: *airflow-env
+    volumes:
+      - airflow_logs:/opt/airflow/logs
+      - ./data:/opt/airflow/data
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      <<: *app-env
+      STALENESS_THRESHOLD_SECONDS: ${STALENESS_THRESHOLD_SECONDS:-60}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  watchdog:
+    build:
+      context: .
+      dockerfile: observability/Dockerfile
+    environment:
+      <<: *app-env
+      STALENESS_THRESHOLD_SECONDS: ${STALENESS_THRESHOLD_SECONDS:-60}
+      IDLE_THRESHOLD_SECONDS: ${IDLE_THRESHOLD_SECONDS:-120}
+      WATCHDOG_INTERVAL_SECONDS: ${WATCHDOG_INTERVAL_SECONDS:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  kafka_data:
+  checkpoints_data:
+  airflow_logs:
