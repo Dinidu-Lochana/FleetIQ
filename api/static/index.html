@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FleetIQ</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+    <header>
+        <div>
+            <h1>FleetIQ &mdash; Fleet Operations</h1>
+            <div class="sub">sim day <span id="sim-day">-</span></div>
+        </div>
+        <span id="status-badge">checking...</span>
+    </header>
+
+    <main>
+        <div class="stat-row">
+            <div class="stat-card"><div class="label">Active Vehicles</div><div class="value" id="active-vehicles">-</div></div>
+            <div class="stat-card"><div class="label">Idle Ratio</div><div class="value" id="idle-ratio">-</div></div>
+            <div class="stat-card"><div class="label">Trips (last hour)</div><div class="value" id="trips-hour">-</div></div>
+            <div class="stat-card"><div class="label">Unresolved Alerts</div><div class="value" id="alert-count">-</div></div>
+        </div>
+
+        <div class="panel">
+            <h2>Zone Utilization &amp; Earnings (latest window)</h2>
+            <table>
+                <thead>
+                    <tr><th>Zone</th><th>Active</th><th>Idle</th><th>Enroute</th><th>On Trip</th><th>Trips</th><th>Earnings</th><th>Avg Speed</th></tr>
+                </thead>
+                <tbody id="zone-table"></tbody>
+            </table>
+            <div class="empty" id="zone-empty" hidden>No zone metrics yet &mdash; waiting for the streaming job to produce a window.</div>
+        </div>
+
+        <div class="panel">
+            <h2>Alerts</h2>
+            <table>
+                <thead><tr><th>Severity</th><th>Type</th><th>Entity</th><th>Message</th><th>Created</th></tr></thead>
+                <tbody id="alerts-table"></tbody>
+            </table>
+            <div class="empty" id="alerts-empty" hidden>No active alerts.</div>
+        </div>
+
+        <div class="panel">
+            <h2>
+                Daily Profitability Reconciliation
+                <span class="day-picker">day <input type="number" id="report-day" min="0" value="0" /></span>
+            </h2>
+            <table>
+                <thead>
+                    <tr><th>Vehicle</th><th>Fare</th><th>Fuel</th><th>Maintenance</th><th>Net Profit</th><th>Distance (km)</th><th>Cost/km</th><th>Status</th></tr>
+                </thead>
+                <tbody id="report-table"></tbody>
+            </table>
+            <div class="empty" id="report-empty" hidden>No reconciliation report for this day yet.</div>
+        </div>
+    </main>
+
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>
