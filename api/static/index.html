@@ -4,7 +4,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>FleetIQ</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <script>
+        // Applied before first paint so there is no flash of the wrong theme.
+        (function () {
+            try {
+                var saved = localStorage.getItem("fleetiq-theme");
+                if (saved === "light" || saved === "dark") {
+                    document.documentElement.setAttribute("data-theme", saved);
+                }
+            } catch (e) { /* localStorage unavailable - fall back to OS preference */ }
+        })();
+    </script>
 </head>
 <body>
     <header>
@@ -12,7 +23,10 @@
             <h1>FleetIQ &mdash; Fleet Operations</h1>
             <div class="sub">sim day <span id="sim-day">-</span></div>
         </div>
-        <span id="status-badge">checking...</span>
+        <div class="header-actions">
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light/dark theme">&#127769; Dark</button>
+            <span id="status-badge">checking...</span>
+        </div>
     </header>
 
     <main>
@@ -35,6 +49,30 @@
         </div>
 
         <div class="panel">
+            <h2>
+                Income Trend
+                <span class="day-picker">
+                    <select id="income-scope"><option value="">All vehicles</option></select>
+                    <select id="income-granularity">
+                        <option value="day">Daily</option>
+                        <option value="month">Monthly (30-day blocks)</option>
+                    </select>
+                    <span class="chart-legend">
+                        <label><input type="checkbox" id="income-filter-profitable" checked />
+                            <span class="swatch swatch-accent"></span> profitable</label>
+                        <label><input type="checkbox" id="income-filter-unprofitable" checked />
+                            <span class="swatch swatch-bad"></span> unprofitable</label>
+                    </span>
+                </span>
+            </h2>
+            <div class="chart-box">
+                <div id="income-chart"></div>
+                <div class="empty" id="income-empty" hidden>No income data matches the current filter.</div>
+            </div>
+            <div class="chart-summary">Total income (shown range): <strong id="income-total">-</strong></div>
+        </div>
+
+        <div class="panel">
             <h2>Alerts</h2>
             <table>
                 <thead><tr><th>Severity</th><th>Type</th><th>Entity</th><th>Message</th><th>Created</th></tr></thead>
@@ -48,6 +86,16 @@
                 Daily Profitability Reconciliation
                 <span class="day-picker">day <input type="number" id="report-day" min="0" value="0" /></span>
             </h2>
+            <div class="chart-box">
+                <div class="chart-legend chart-legend-overlay">
+                    <label><input type="checkbox" id="filter-profitable" checked />
+                        <span class="swatch swatch-good"></span> profitable</label>
+                    <label><input type="checkbox" id="filter-unprofitable" checked />
+                        <span class="swatch swatch-bad"></span> unprofitable</label>
+                </div>
+                <div id="profit-chart"></div>
+                <div class="empty" id="profit-chart-empty" hidden>No vehicles match the current filter.</div>
+            </div>
             <table>
                 <thead>
                     <tr><th>Vehicle</th><th>Fare</th><th>Fuel</th><th>Maintenance</th><th>Net Profit</th><th>Distance (km)</th><th>Cost/km</th><th>Status</th></tr>
@@ -58,6 +106,6 @@
         </div>
     </main>
 
-    <script src="/static/dashboard.js"></script>
+    <script src="/static/dashboard.js?v=10"></script>
 </body>
 </html>
