@@ -38,6 +38,26 @@ def rand_point():
     return lat, lon
 
 
+def nearby_point(lat, lon, min_km=0.6, max_km=2.5):
+    """A trip target near the vehicle's current position, not anywhere in the
+    whole city box. Each enroute/on_trip leg is capped to a handful of ticks
+    (a few hundred metres), so a target drawn from the full box is almost
+    never reached before a fresh one is picked - and because that fresh
+    target is always full-box-uniform regardless of where the vehicle
+    currently is, any vehicle away from dead-centre has more box "inward"
+    than "outward", producing a steady drift toward the centroid over many
+    thousands of ticks. Sampling relative to the current position removes
+    that bias, so the fleet actually spreads across all zones over time."""
+    distance_km = random.uniform(min_km, max_km)
+    bearing = random.uniform(0, 2 * math.pi)
+    deg_per_km = 1 / 111.0
+    d_lat = distance_km * deg_per_km * math.cos(bearing)
+    d_lon = distance_km * deg_per_km * math.sin(bearing)
+    new_lat = min(max(lat + d_lat, CITY_BOUNDS["min_lat"]), CITY_BOUNDS["max_lat"])
+    new_lon = min(max(lon + d_lon, CITY_BOUNDS["min_lon"]), CITY_BOUNDS["max_lon"])
+    return new_lat, new_lon
+
+
 def move_towards(lat, lon, target_lat, target_lon, km_this_tick):
     d_lat = target_lat - lat
     d_lon = target_lon - lon
@@ -78,7 +98,7 @@ class Vehicle:
             self.lon += random.uniform(-0.0003, 0.0003)
             if self.maybe_dispatch():
                 self.trip_id = f"T{uuid.uuid4().hex[:10]}"
-                self.target_lat, self.target_lon = rand_point()
+                self.target_lat, self.target_lon = nearby_point(self.lat, self.lon)
                 self.ticks_remaining = random.randint(*ENROUTE_TICKS_RANGE)
                 self._set_status("enroute")
             speed_kmh = 0.0
@@ -91,7 +111,7 @@ class Vehicle:
             )
             self.ticks_remaining -= 1
             if arrived or self.ticks_remaining <= 0:
-                self.target_lat, self.target_lon = rand_point()
+                self.target_lat, self.target_lon = nearby_point(self.lat, self.lon)
                 self.ticks_remaining = random.randint(*ON_TRIP_TICKS_RANGE)
                 self._set_status("on_trip")
 
