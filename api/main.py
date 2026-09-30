@@ -117,6 +117,25 @@ def daily_report(sim_day: int):
     }
 
 
+@app.get("/reports/profitability-summary")
+def profitability_summary():
+    """Profitable-vs-unprofitable split for the most recently *reconciled*
+    day (not "today", which is almost always still open and has nothing in
+    daily_profitability_report yet) - backs the Overview donut chart."""
+    REQUEST_COUNTER.labels(path="/reports/profitability-summary").inc()
+    row = db.query_one(
+        """SELECT sim_day, count(*) AS vehicle_count,
+                  sum(CASE WHEN profitable THEN 1 ELSE 0 END) AS profitable_count,
+                  sum(CASE WHEN NOT profitable THEN 1 ELSE 0 END) AS unprofitable_count
+           FROM daily_profitability_report
+           WHERE sim_day = (SELECT max(sim_day) FROM daily_profitability_report)
+           GROUP BY sim_day"""
+    )
+    if not row:
+        return {"sim_day": None, "vehicle_count": 0, "profitable_count": 0, "unprofitable_count": 0}
+    return row
+
+
 @app.get("/vehicles")
 def list_vehicles():
     REQUEST_COUNTER.labels(path="/vehicles").inc()

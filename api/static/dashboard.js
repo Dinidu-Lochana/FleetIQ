@@ -33,6 +33,29 @@ function initThemeToggle() {
 }
 initThemeToggle();
 
+// --- sidebar navigation: one section visible at a time ---
+function showSection(name) {
+    document.querySelectorAll(".content-section").forEach((sec) => {
+        sec.hidden = sec.id !== `section-${name}`;
+    });
+    document.querySelectorAll(".nav-item").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.section === name);
+    });
+    try { localStorage.setItem("fleetiq-section", name); } catch (e) { /* ignore */ }
+}
+function initNav() {
+    let start = "overview";
+    try {
+        const saved = localStorage.getItem("fleetiq-section");
+        if (saved && document.getElementById(`section-${saved}`)) start = saved;
+    } catch (e) { /* ignore */ }
+    showSection(start);
+    document.querySelectorAll(".nav-item").forEach((btn) => {
+        btn.addEventListener("click", () => showSection(btn.dataset.section));
+    });
+}
+initNav();
+
 function fmtMoney(n) { return n === null || n === undefined ? "-" : "$" + Number(n).toFixed(2); }
 function fmtNum(n, d = 1) { return n === null || n === undefined ? "-" : Number(n).toFixed(d); }
 
@@ -49,11 +72,59 @@ async function refreshHealth() {
         const badge = el("status-badge");
         badge.textContent = h.status;
         badge.className = h.status === "healthy" ? "status-healthy" : "status-degraded";
-        if (!reportDayTouched) el("report-day").value = h.sim_day;
+        // Default to the day that just closed, not "today" - Airflow only ever
+        // reconciles the previous day, so "today" always shows empty here.
+        if (!reportDayTouched) el("report-day").value = Math.max(0, h.sim_day - 1);
     } catch (e) {
         el("status-badge").textContent = "unreachable";
         el("status-badge").className = "status-degraded";
     }
+}
+
+function renderProfitDonut(data) {
+    const container = el("profit-donut");
+    if (!container) return;
+    const vehicleCount = Number(data.vehicle_count) || 0;
+    const profitableCount = Number(data.profitable_count) || 0;
+    const unprofitableCount = Number(data.unprofitable_count) || 0;
+
+    el("profit-donut-day").textContent = vehicleCount ? `(sim day ${data.sim_day})` : "";
+    el("profit-donut-empty").hidden = vehicleCount > 0;
+    if (!vehicleCount) {
+        container.innerHTML = "";
+        el("profit-donut-summary").textContent = "-";
+        return;
+    }
+
+    const size = 160, stroke = 22, r = (size - stroke) / 2, cx = size / 2, cy = size / 2;
+    const circumference = 2 * Math.PI * r;
+    const profitFrac = profitableCount / vehicleCount;
+    const profitLen = circumference * profitFrac;
+    const unprofitLen = circumference - profitLen;
+    const pct = Math.round(profitFrac * 100);
+
+    container.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" style="stroke:var(--border)" stroke-width="${stroke}" />
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" style="stroke:var(--bad)" stroke-width="${stroke}"
+            stroke-dasharray="${unprofitLen.toFixed(2)} ${circumference.toFixed(2)}" stroke-dashoffset="0"
+            transform="rotate(-90 ${cx} ${cy})"><title>Unprofitable: ${unprofitableCount} (${100 - pct}%)</title></circle>
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" style="stroke:var(--good)" stroke-width="${stroke}"
+            stroke-dasharray="${profitLen.toFixed(2)} ${circumference.toFixed(2)}" stroke-dashoffset="${(-unprofitLen).toFixed(2)}"
+            transform="rotate(-90 ${cx} ${cy})"><title>Profitable: ${profitableCount} (${pct}%)</title></circle>
+        <text x="${cx}" y="${cy - 3}" text-anchor="middle" font-size="26" font-weight="700" style="fill:var(--text)">${pct}%</text>
+        <text x="${cx}" y="${cy + 17}" text-anchor="middle" font-size="11" style="fill:var(--muted)">profitable</text>
+    </svg>`;
+    el("profit-donut-summary").innerHTML =
+        `<strong style="color:var(--good)">${profitableCount} profitable</strong> &middot; ` +
+        `<strong style="color:var(--bad)">${unprofitableCount} unprofitable</strong> ` +
+        `<span style="color:var(--muted)">(${vehicleCount} vehicles)</span>`;
+}
+
+async function refreshProfitDonut() {
+    try {
+        const data = await fetchJson("/reports/profitability-summary");
+        renderProfitDonut(data);
+    } catch (e) { /* ignore */ }
 }
 
 async function refreshRealtime() {
@@ -85,6 +156,9 @@ async function refreshAlerts() {
     try {
         const a = await fetchJson("/alerts");
         el("alert-count").textContent = a.count;
+        const navBadge = el("nav-alert-badge");
+        navBadge.textContent = a.count;
+        navBadge.hidden = a.count === 0;
         const tbody = el("alerts-table");
         tbody.innerHTML = "";
         el("alerts-empty").hidden = a.alerts.length > 0;
@@ -294,7 +368,7 @@ el("income-filter-profitable").addEventListener("change", renderIncomeTrendView)
 el("income-filter-unprofitable").addEventListener("change", renderIncomeTrendView);
 
 async function tick() {
-    await Promise.all([refreshHealth(), refreshRealtime(), refreshAlerts(), refreshReport(), refreshIncomeTrend()]);
+    await Promise.all([refreshHealth(), refreshRealtime(), refreshAlerts(), refreshReport(), refreshIncomeTrend(), refreshProfitDonut()]);
 }
 
 loadVehicleOptions();

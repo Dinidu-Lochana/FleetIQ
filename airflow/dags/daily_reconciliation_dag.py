@@ -86,6 +86,19 @@ def _load_expenses(**context):
     log.info(f"Loaded {len(rows)} expense rows for sim_day={target_day}")
 
 
+def _raise_alert_if_new(cur, alert_type, severity, entity_id, message):
+    cur.execute(
+        "SELECT id FROM alerts WHERE alert_type = %s AND entity_id = %s AND NOT resolved",
+        (alert_type, entity_id),
+    )
+    if cur.fetchone():
+        return
+    cur.execute(
+        "INSERT INTO alerts (alert_type, severity, entity_id, message) VALUES (%s, %s, %s, %s)",
+        (alert_type, severity, entity_id, message),
+    )
+
+
 def _health_check(**context):
     target_day = context["ti"].xcom_pull(task_ids="compute_sim_day")
     with psycopg2.connect(get_dsn()) as conn:
@@ -99,20 +112,26 @@ def _health_check(**context):
             total = total or 0
             unprofitable = unprofitable or 0
 
+            # Only the most recently checked day's batch health is operationally
+            # relevant - resolve any earlier day's still-open alert of these types
+            # so /alerts doesn't accumulate one permanently-unresolved entry per
+            # bad historical day forever.
+            cur.execute(
+                """UPDATE alerts SET resolved = true
+                   WHERE alert_type IN ('reconciliation_missing', 'fleet_profitability')
+                     AND entity_id != %s AND NOT resolved""",
+                (str(target_day),),
+            )
+
             if total == 0:
-                cur.execute(
-                    """INSERT INTO alerts (alert_type, severity, entity_id, message)
-                       VALUES ('reconciliation_missing', 'critical', %s, %s)""",
-                    (str(target_day), f"No profitability report rows produced for sim_day={target_day}"),
+                _raise_alert_if_new(
+                    cur, "reconciliation_missing", "critical", str(target_day),
+                    f"No profitability report rows produced for sim_day={target_day}",
                 )
             elif unprofitable / total > 0.5:
-                cur.execute(
-                    """INSERT INTO alerts (alert_type, severity, entity_id, message)
-                       VALUES ('fleet_profitability', 'warning', %s, %s)""",
-                    (
-                        str(target_day),
-                        f"{unprofitable}/{total} vehicles unprofitable on sim_day={target_day}",
-                    ),
+                _raise_alert_if_new(
+                    cur, "fleet_profitability", "warning", str(target_day),
+                    f"{unprofitable}/{total} vehicles unprofitable on sim_day={target_day}",
                 )
             cur.execute(
                 """INSERT INTO pipeline_health (component, last_event_at, status, updated_at)
