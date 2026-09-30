@@ -23,7 +23,7 @@ FLEET_SIZE = int(os.environ.get("FLEET_SIZE", "24"))
 TICK_SECONDS = float(os.environ.get("TICK_SECONDS", "3"))
 CHRONICALLY_IDLE_FRACTION = float(os.environ.get("CHRONICALLY_IDLE_FRACTION", "0.15"))
 
-BASE_FARE = 1.5
+BASE_FARE = 2.0
 PER_KM_RATE = 0.9
 PER_MIN_RATE = 0.25
 TRIP_SPEED_KMH = (25, 55)
