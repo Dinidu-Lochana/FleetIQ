@@ -117,6 +117,68 @@ def daily_report(sim_day: int):
     }
 
 
+@app.get("/reports/profitability-summary")
+def profitability_summary():
+    """Profitable-vs-unprofitable split for the most recently *reconciled*
+    day (not "today", which is almost always still open and has nothing in
+    daily_profitability_report yet) - backs the Overview donut chart."""
+    REQUEST_COUNTER.labels(path="/reports/profitability-summary").inc()
+    row = db.query_one(
+        """SELECT sim_day, count(*) AS vehicle_count,
+                  sum(CASE WHEN profitable THEN 1 ELSE 0 END) AS profitable_count,
+                  sum(CASE WHEN NOT profitable THEN 1 ELSE 0 END) AS unprofitable_count
+           FROM daily_profitability_report
+           WHERE sim_day = (SELECT max(sim_day) FROM daily_profitability_report)
+           GROUP BY sim_day"""
+    )
+    if not row:
+        return {"sim_day": None, "vehicle_count": 0, "profitable_count": 0, "unprofitable_count": 0}
+    return row
+
+
+@app.get("/vehicles")
+def list_vehicles():
+    REQUEST_COUNTER.labels(path="/vehicles").inc()
+    rows = db.query("SELECT DISTINCT vehicle_id FROM vehicle_status_latest ORDER BY vehicle_id")
+    return {"vehicles": [r["vehicle_id"] for r in rows]}
+
+
+@app.get("/reports/income-trend")
+def income_trend(vehicle_id: str | None = None, days: int = 200):
+    """Fleet-wide (default) or single-vehicle income by sim_day, from the
+    speed layer's own running total - so it includes the current, still-open
+    day, not just fully-reconciled ones. The dashboard groups this into
+    30-sim_day "month" buckets client-side for the monthly view.
+
+    Left-joins the batch layer's profitability report so the dashboard can
+    colour a day red once it's known to be a net loss; `profitable` is null
+    for a day/vehicle that hasn't been reconciled yet (nothing to colour)."""
+    REQUEST_COUNTER.labels(path="/reports/income-trend").inc()
+    days = max(1, min(days, 500))
+    if vehicle_id:
+        rows = db.query(
+            """SELECT e.sim_day, e.total_fare, e.trip_count, r.net_profit, r.profitable
+               FROM vehicle_daily_earnings e
+               LEFT JOIN daily_profitability_report r
+                   ON r.vehicle_id = e.vehicle_id AND r.sim_day = e.sim_day
+               WHERE e.vehicle_id = %s ORDER BY e.sim_day DESC LIMIT %s""",
+            (vehicle_id, days),
+        )
+    else:
+        rows = db.query(
+            """SELECT e.sim_day, sum(e.total_fare) AS total_fare, sum(e.trip_count) AS trip_count,
+                      sum(r.net_profit) AS net_profit,
+                      CASE WHEN sum(r.net_profit) IS NULL THEN NULL ELSE sum(r.net_profit) > 0 END AS profitable
+               FROM vehicle_daily_earnings e
+               LEFT JOIN daily_profitability_report r
+                   ON r.vehicle_id = e.vehicle_id AND r.sim_day = e.sim_day
+               GROUP BY e.sim_day ORDER BY e.sim_day DESC LIMIT %s""",
+            (days,),
+        )
+    rows.reverse()  # chronological order for charting
+    return {"vehicle_id": vehicle_id, "days": rows}
+
+
 @app.get("/alerts")
 def alerts(include_resolved: bool = False):
     REQUEST_COUNTER.labels(path="/alerts").inc()

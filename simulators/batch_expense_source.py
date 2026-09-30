@@ -19,7 +19,7 @@ LANDING_DIR = os.environ.get("LANDING_DIR", "/app/data/landing")
 POLL_SECONDS = 5
 
 FUEL_RATE_PER_KM = 0.35
-MAINT_BASE = 2.0
+MAINT_BASE = 1.0
 SERVICE_PROBABILITY = 0.05
 KM_PER_DEGREE = 111.0  # same approximation used by the telemetry simulator's movement model
 MOVING_STATUSES = ("enroute", "on_trip")
@@ -70,7 +70,7 @@ def write_expense_file(day: int):
             distance *= random.uniform(0.95, 1.05)
             service_flag = random.random() < SERVICE_PROBABILITY
             fuel_cost = round(distance * FUEL_RATE_PER_KM * random.uniform(0.9, 1.2), 2)
-            maintenance_cost = round(MAINT_BASE + (random.uniform(15, 60) if service_flag else random.uniform(0, 3)), 2)
+            maintenance_cost = round(MAINT_BASE + (random.uniform(15, 60) if service_flag else random.uniform(0, 2)), 2)
             writer.writerow([vehicle_id, fuel_cost, maintenance_cost, round(distance, 2), service_flag])
     os.replace(tmp_path, path)
     log.info(f"Wrote daily expense file for sim_day={day}", extra={"sim_day": day})

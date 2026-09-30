@@ -4,60 +4,157 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>FleetIQ</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=13" />
+    <script>
+        // Applied before first paint so there is no flash of the wrong theme.
+        (function () {
+            try {
+                var saved = localStorage.getItem("fleetiq-theme");
+                if (saved === "light" || saved === "dark") {
+                    document.documentElement.setAttribute("data-theme", saved);
+                }
+            } catch (e) { /* localStorage unavailable - fall back to OS preference */ }
+        })();
+    </script>
 </head>
 <body>
-    <header>
-        <div>
-            <h1>FleetIQ &mdash; Fleet Operations</h1>
-            <div class="sub">sim day <span id="sim-day">-</span></div>
-        </div>
-        <span id="status-badge">checking...</span>
-    </header>
+    <div class="app">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">Fleet<span>IQ</span></div>
+                <div class="sub">sim day <span id="sim-day">-</span></div>
+            </div>
 
-    <main>
-        <div class="stat-row">
-            <div class="stat-card"><div class="label">Active Vehicles</div><div class="value" id="active-vehicles">-</div></div>
-            <div class="stat-card"><div class="label">Idle Ratio</div><div class="value" id="idle-ratio">-</div></div>
-            <div class="stat-card"><div class="label">Trips (last hour)</div><div class="value" id="trips-hour">-</div></div>
-            <div class="stat-card"><div class="label">Unresolved Alerts</div><div class="value" id="alert-count">-</div></div>
-        </div>
+            <nav class="sidebar-nav">
+                <button class="nav-item active" type="button" data-section="overview">
+                    <span class="nav-icon" aria-hidden="true">&#128202;</span> Overview
+                </button>
+                <button class="nav-item" type="button" data-section="zones">
+                    <span class="nav-icon" aria-hidden="true">&#128506;&#65039;</span> Zones
+                </button>
+                <button class="nav-item" type="button" data-section="income">
+                    <span class="nav-icon" aria-hidden="true">&#128200;</span> Income Trend
+                </button>
+                <button class="nav-item" type="button" data-section="alerts">
+                    <span class="nav-icon" aria-hidden="true">&#128276;</span> Alerts
+                    <span class="nav-badge" id="nav-alert-badge" hidden>0</span>
+                </button>
+                <button class="nav-item" type="button" data-section="reports">
+                    <span class="nav-icon" aria-hidden="true">&#128203;</span> Daily Report
+                </button>
+            </nav>
 
-        <div class="panel">
-            <h2>Zone Utilization &amp; Earnings (latest window)</h2>
-            <table>
-                <thead>
-                    <tr><th>Zone</th><th>Active</th><th>Idle</th><th>Enroute</th><th>On Trip</th><th>Trips</th><th>Earnings</th><th>Avg Speed</th></tr>
-                </thead>
-                <tbody id="zone-table"></tbody>
-            </table>
-            <div class="empty" id="zone-empty" hidden>No zone metrics yet &mdash; waiting for the streaming job to produce a window.</div>
-        </div>
+            <div class="sidebar-footer">
+                <span id="status-badge">checking...</span>
+                <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light/dark theme">&#127769; Dark</button>
+            </div>
+        </aside>
 
-        <div class="panel">
-            <h2>Alerts</h2>
-            <table>
-                <thead><tr><th>Severity</th><th>Type</th><th>Entity</th><th>Message</th><th>Created</th></tr></thead>
-                <tbody id="alerts-table"></tbody>
-            </table>
-            <div class="empty" id="alerts-empty" hidden>No active alerts.</div>
-        </div>
+        <main class="content">
+            <section class="content-section" id="section-overview">
+                <h1>Overview</h1>
+                <p class="section-desc">Live snapshot of the whole fleet, right now.</p>
+                <div class="stat-row">
+                    <div class="stat-card"><div class="label">Active Vehicles</div><div class="value" id="active-vehicles">-</div></div>
+                    <div class="stat-card"><div class="label">Idle Ratio</div><div class="value" id="idle-ratio">-</div></div>
+                    <div class="stat-card"><div class="label">Trips (last hour)</div><div class="value" id="trips-hour">-</div></div>
+                    <div class="stat-card"><div class="label">Unresolved Alerts</div><div class="value" id="alert-count">-</div></div>
+                </div>
 
-        <div class="panel">
-            <h2>
-                Daily Profitability Reconciliation
-                <span class="day-picker">day <input type="number" id="report-day" min="0" value="0" /></span>
-            </h2>
-            <table>
-                <thead>
-                    <tr><th>Vehicle</th><th>Fare</th><th>Fuel</th><th>Maintenance</th><th>Net Profit</th><th>Distance (km)</th><th>Cost/km</th><th>Status</th></tr>
-                </thead>
-                <tbody id="report-table"></tbody>
-            </table>
-            <div class="empty" id="report-empty" hidden>No reconciliation report for this day yet.</div>
-        </div>
-    </main>
+                <div class="panel">
+                    <h2 class="panel-title">Profitability Split <span class="muted-small" id="profit-donut-day"></span></h2>
+                    <div class="donut-row">
+                        <div id="profit-donut"></div>
+                        <div class="donut-legend">
+                            <div><span class="swatch swatch-good"></span> Profitable</div>
+                            <div><span class="swatch swatch-bad"></span> Unprofitable</div>
+                            <div class="chart-summary" id="profit-donut-summary">-</div>
+                        </div>
+                    </div>
+                    <div class="empty" id="profit-donut-empty" hidden>No reconciled day yet &mdash; the batch layer hasn't completed its first cycle.</div>
+                </div>
+            </section>
 
-    <script src="/static/dashboard.js"></script>
+            <section class="content-section" id="section-zones" hidden>
+                <h1>Zone Utilization &amp; Earnings</h1>
+                <p class="section-desc">Latest 1-minute window, per zone. Green rows earned something; red rows didn't.</p>
+                <div class="panel">
+                    <table>
+                        <thead>
+                            <tr><th>Zone</th><th>Active</th><th>Idle</th><th>Enroute</th><th>On Trip</th><th>Trips</th><th>Earnings</th><th>Avg Speed</th></tr>
+                        </thead>
+                        <tbody id="zone-table"></tbody>
+                    </table>
+                    <div class="empty" id="zone-empty" hidden>No zone metrics yet &mdash; waiting for the streaming job to produce a window.</div>
+                </div>
+            </section>
+
+            <section class="content-section" id="section-income" hidden>
+                <h1>Income Trend</h1>
+                <p class="section-desc">Revenue over time, fleet-wide or per vehicle &mdash; red marks a confirmed net-loss day.</p>
+                <div class="panel">
+                    <div class="panel-toolbar">
+                        <select id="income-scope"><option value="">All vehicles</option></select>
+                        <select id="income-granularity">
+                            <option value="day">Daily</option>
+                            <option value="month">Monthly (30-day blocks)</option>
+                        </select>
+                        <span class="chart-legend">
+                            <label><input type="checkbox" id="income-filter-profitable" checked />
+                                <span class="swatch swatch-accent"></span> profitable</label>
+                            <label><input type="checkbox" id="income-filter-unprofitable" checked />
+                                <span class="swatch swatch-bad"></span> unprofitable</label>
+                        </span>
+                    </div>
+                    <div class="chart-box">
+                        <div id="income-chart"></div>
+                        <div class="empty" id="income-empty" hidden>No income data matches the current filter.</div>
+                    </div>
+                    <div class="chart-summary">Total income (shown range): <strong id="income-total">-</strong></div>
+                </div>
+            </section>
+
+            <section class="content-section" id="section-alerts" hidden>
+                <h1>Alerts</h1>
+                <p class="section-desc">Pipeline staleness, idle vehicles, and batch-layer health checks &mdash; live.</p>
+                <div class="panel">
+                    <table>
+                        <thead><tr><th>Severity</th><th>Type</th><th>Entity</th><th>Message</th><th>Created</th></tr></thead>
+                        <tbody id="alerts-table"></tbody>
+                    </table>
+                    <div class="empty" id="alerts-empty" hidden>No active alerts.</div>
+                </div>
+            </section>
+
+            <section class="content-section" id="section-reports" hidden>
+                <h1>Daily Profitability Reconciliation</h1>
+                <p class="section-desc">The batch layer's per-vehicle join of earnings against fuel/maintenance costs.</p>
+                <div class="panel">
+                    <div class="panel-toolbar">
+                        day <input type="number" id="report-day" min="0" value="0" />
+                        <span class="chart-legend">
+                            <label><input type="checkbox" id="filter-profitable" checked />
+                                <span class="swatch swatch-good"></span> profitable</label>
+                            <label><input type="checkbox" id="filter-unprofitable" checked />
+                                <span class="swatch swatch-bad"></span> unprofitable</label>
+                        </span>
+                    </div>
+                    <div class="chart-box">
+                        <div id="profit-chart"></div>
+                        <div class="empty" id="profit-chart-empty" hidden>No vehicles match the current filter.</div>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr><th>Vehicle</th><th>Fare</th><th>Fuel</th><th>Maintenance</th><th>Net Profit</th><th>Distance (km)</th><th>Cost/km</th><th>Status</th></tr>
+                        </thead>
+                        <tbody id="report-table"></tbody>
+                    </table>
+                    <div class="empty" id="report-empty" hidden>No reconciliation report for this day yet.</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/dashboard.js?v=13"></script>
 </body>
 </html>
